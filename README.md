@@ -1,3 +1,5 @@
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/secretflow/capsule-manager-sdk/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/secretflow/capsule-manager-sdk/tree/main)
+
 # CapsuleManager SDK
 
 CapsuleManager sdk offers several apis to access CapsuleManager Service, which is designed to manage metadata of user data and authorization information.
