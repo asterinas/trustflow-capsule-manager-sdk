@@ -81,8 +81,9 @@ jobs:
             conda activate build
             cd python
             python3 setup.py bdist_wheel
-            python3 -m pip install twine
-            python3 -m twine upload -r pypi -u __token__ -p ${PYPI_TWINE_TOKEN} dist/*.whl
+            python3 -m pip install twine auditwheel patchelf
+            auditwheel repair dist/*.whl --plat manylinux_2_31_x86_64
+            python3 -m twine upload -r pypi -u __token__ -p ${PYPI_TWINE_TOKEN} wheelhouse/*.whl
 
 # Invoke jobs via workflows
 # See: https://circleci.com/docs/2.0/configuration-reference/#workflows
