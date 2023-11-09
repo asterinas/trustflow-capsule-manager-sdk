@@ -76,19 +76,12 @@ jobs:
       - run:
           name: "build package and publish"
           command: |
+            source /root/miniconda3/etc/profile.d/conda.sh
             conda create -n build python=<< parameters.python_ver >> -y
-            conda init
             conda activate build
             cd python
-            python3 -m pip install twine auditwheel patchelf
-
             python3 setup.py bdist_wheel
-
-            ls dist/*.whl
-            auditwheel repair dist/*.whl --plat manylinux2014_x86_64
-            ls wheelhouse/*.whl
-
-            python3 -m twine upload -r pypi -u __token__ -p ${PYPI_TWINE_TOKEN} wheelhouse/*.whl
+            python3 -m twine upload -r pypi -u __token__ -p ${PYPI_TWINE_TOKEN} dist/*.whl
 
 # Invoke jobs via workflows
 # See: https://circleci.com/docs/2.0/configuration-reference/#workflows
