@@ -77,6 +77,7 @@ jobs:
           name: "build package and publish"
           command: |
             conda create -n build python=<< parameters.python_ver >> -y
+            conda init
             conda activate build
             cd python
             python3 -m pip install twine auditwheel patchelf
