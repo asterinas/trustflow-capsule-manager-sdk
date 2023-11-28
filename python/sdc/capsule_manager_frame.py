@@ -25,7 +25,6 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography import x509
 from sdc.crypto import asymm, symm
 from sdc.error import CapsuleManagerError
-from sdc.ual import ual
 from sdc.util import crypto, tool
 from sdc.ual.constants import NONCE_SIZE_IN_SIZE
 from secretflowapis.v2.sdc import ual_pb2
@@ -178,6 +177,8 @@ class CapsuleManagerFrame(object):
         assert len(response.cert) != 0, "The CapsuleManager should have public key."
 
         if not self.sim:
+            from sdc.ual import ual
+            
             policy = ual_pb2.UnifiedAttestationPolicy()
             rule = policy.main_attributes.add()
             rule.str_tee_platform = "SGX_DCAP"
