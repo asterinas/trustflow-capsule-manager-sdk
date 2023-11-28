@@ -70,7 +70,7 @@ class BuildBazelExtension(build_ext.build_ext):
 
 setuptools.setup(
     name="capsule-manager-sdk",
-    version="0.1.0b",
+    version="0.1.1b",
     author="secretflow",
     author_email="secretflow-contact@service.alipay.com",
     description="Secure Data Capsule SDK for python",
