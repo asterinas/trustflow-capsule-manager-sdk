@@ -34,11 +34,11 @@ def cms_util():
     help="file path for storing private key",
 )
 @click.option(
-    "--cert-pems-file",
+    "--cert-file",
     type=click.STRING,
     help="file path for storing cert chain which is list",
 )
-def generate_rsa_keypair(private_key_file, cert_pems_file):
+def generate_rsa_keypair(private_key_file, cert_file):
     """
     generate rsa key pair (private_key, cert_chain)
     """
@@ -48,10 +48,8 @@ def generate_rsa_keypair(private_key_file, cert_pems_file):
     ) = crypto.generate_rsa_keypair()
     if private_key_file:
         file.write_file(private_key_file, "w", pri_key_pem.decode("utf-8"))
-    if cert_pems_file:
-        file.write_file(
-            cert_pems_file, "w", [cert.decode("utf-8") for cert in cert_pems]
-        )
+    if cert_file:
+        file.write_file(cert_file, "w", cert_pems[0].decode("utf-8"))
 
 
 @cms_util.command()
