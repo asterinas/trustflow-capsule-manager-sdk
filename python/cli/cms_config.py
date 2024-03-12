@@ -30,7 +30,7 @@ def restore_config(cfg: dict):
 
 
 def set_dict_value(cfg: dict, key, value):
-    if value is not None:
+    if key and value:
         cfg[key] = value
 
 
