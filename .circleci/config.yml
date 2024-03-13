@@ -48,6 +48,7 @@ jobs:
           name: "Install python deps"
           command: |
             pwd
+            pip3 install --upgrade pip
             pip install -r python/dev-requirements.txt
       - run:
           name: "unit test"
