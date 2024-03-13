@@ -54,6 +54,7 @@ jobs:
           name: "unit test"
           command: |
             cd python
+            export PYTHONPATH=.:$PYTHONPATH
             python setup.py build_ext --inplace
             mkdir test-results
             pytest --junitxml=test-results/junit-report.xml
