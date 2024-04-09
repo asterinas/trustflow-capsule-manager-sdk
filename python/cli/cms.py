@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import base64
 import os
 from typing import List
+
 import click
-import base64
-from sdc.util import file
-from sdc import capsule_manager_frame
 from google.protobuf import json_format
+from sdc import capsule_manager_frame
+from sdc.util import file
 
 current_work_dir = os.path.dirname(__file__)
 CONFIG_FILE = current_work_dir + "/cms/cli.yaml"
@@ -52,6 +53,17 @@ def cms(ctx, config_file):
     global CONFIG_FILE
     CONFIG_FILE = config_file
     config = file.read_yaml_file(CONFIG_FILE)
+    tee_constraints = config["tee_constraints"]
+    mr_plat = (
+        tee_constraints["mr_plat"] if tee_constraints["mr_plat"] is not None else ""
+    )
+    mr_boot = (
+        tee_constraints["mr_boot"] if tee_constraints["mr_boot"] is not None else ""
+    )
+    mr_ta = tee_constraints["mr_ta"] if tee_constraints["mr_ta"] is not None else ""
+    mr_signer = (
+        tee_constraints["mr_signer"] if tee_constraints["mr_signer"] is not None else ""
+    )
 
     if (
         config["root_ca_file"] is not None
@@ -68,13 +80,16 @@ def cms(ctx, config_file):
 
         ctx.obj = capsule_manager_frame.CapsuleManagerFrame(
             config["host"],
-            config["mr_enclave"],
+            config["tee_plat"],
+            capsule_manager_frame.TeeConstraints(mr_plat, mr_boot, mr_ta, mr_signer),
             capsule_manager_frame.CredentialsConf(root_ca, private_key, cert_chain),
-            config["sim"],
         )
     else:
         ctx.obj = capsule_manager_frame.CapsuleManagerFrame(
-            config["host"], config["mr_enclave"], None, config["sim"]
+            config["host"],
+            config["tee_plat"],
+            capsule_manager_frame.TeeConstraints(mr_plat, mr_boot, mr_ta, mr_signer),
+            None,
         )
 
 
@@ -103,36 +118,6 @@ def register_cert(ctx):
 
 @cms.command()
 @click.pass_context
-def get_data_keys(ctx):
-    """
-    get data_keys of several resource_uris from CapsuleManager
-    """
-    config = file.read_yaml_file(CONFIG_FILE)
-    common = config["common"]
-    ownered = config["get_data_keys"]
-    cert_pems, private_key = read_rsa_keypair(common)
-
-    result = ctx.obj.get_data_keys(
-        ownered["initiator_party_id"],
-        ownered["scope"],
-        ownered["op_name"],
-        ownered["resource_uris"],
-        ownered["env"],
-        ownered["global_attrs"],
-        ownered["columns"],
-        ownered["attrs"],
-        cert_pems,
-        private_key,
-    )
-    result = [
-        (resource_uri, data_key, base64.b64encode(data_key).decode("utf-8"))
-        for (resource_uri, data_key) in result
-    ]
-    print(result)
-
-
-@cms.command()
-@click.pass_context
 def register_data_keys(ctx):
     """
     upload data_keys of several resource_uris to CapsuleManager
@@ -142,10 +127,20 @@ def register_data_keys(ctx):
     ownered = config["register_data_keys"]
     cert_pems, private_key = read_rsa_keypair(common)
 
-    data_keys = [base64.b64decode(data_key) for data_key in ownered["data_key_b64s"]]
+    data_keys = ownered["data_keys"]
+
+    # check data_key_b64 format
+    for data_key in data_keys:
+        data_key_b64 = data_key.get("data_key_b64")
+        try:
+            base64.b64decode(data_key_b64, validate=True)
+        except (ValueError, base64.binascii.Error):
+            raise ValueError(
+                f"The provided data_key_b64: {data_key_b64} is not a valid base64 encoded string"
+            )
+
     ctx.obj.create_data_keys(
         common["party_id"],
-        ownered["resource_uris"],
         data_keys,
         cert_pems,
         private_key,
@@ -185,12 +180,7 @@ def register_data_policy(ctx):
         common["party_id"],
         ownered["scope"],
         ownered["data_uuid"],
-        ownered["rule_ids"],
-        ownered["grantee_party_ids"],
-        ownered["columns"],
-        ownered["global_constraints"],
-        ownered["op_constraints_name"],
-        ownered["op_constraints_body"],
+        ownered["rules"],
         cert_pems,
         private_key,
     )
@@ -231,12 +221,7 @@ def add_data_rule(ctx):
         common["party_id"],
         ownered["scope"],
         ownered["data_uuid"],
-        ownered["rule_id"],
-        ownered["grantee_party_ids"],
-        ownered["columns"],
-        ownered["global_constraints"],
-        ownered["op_constraints_name"],
-        ownered["op_constraints_body"],
+        ownered["rule"],
         cert_pems,
         private_key,
     )
@@ -265,24 +250,24 @@ def delete_data_rule(ctx):
 
 @cms.command()
 @click.pass_context
-def get_export_data_key(ctx):
+def get_export_data_key_b64(ctx):
     """
-    get the data key of export data(often is generated from origin
+    get the base64 encoded data key of export data(often is generated from origin
     datas of multiply differernt partys) from CapsuleManager
     """
     config = file.read_yaml_file(CONFIG_FILE)
     common = config["common"]
-    ownered = config["get_export_data_key"]
+    ownered = config["get_export_data_key_b64"]
     cert_pems, private_key = read_rsa_keypair(common)
 
-    data_key = ctx.obj.get_export_data_key(
+    data_key = ctx.obj.get_export_data_key_b64(
         common["party_id"],
         ownered["resource_uri"],
         file.read_file(ownered["data_export_certificate_file"], "r"),
         cert_pems,
         private_key,
     )
-    print(data_key, base64.b64encode(data_key))
+    print(data_key)
 
 
 @cms.command()

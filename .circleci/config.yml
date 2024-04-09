@@ -34,40 +34,33 @@ jobs:
     # Specify the execution environment. You can specify an image from Dockerhub or use one of our Convenience Images from CircleCI's Developer Hub.
     # See: https://circleci.com/docs/2.0/configuration-reference/#docker-machine-macos-windows-executor
     docker:
-      - image: secretflow/trustflow-ci-ubuntu20.04:0.1.0b
+      - image: secretflow/trustedflow-dev-ubuntu22.04:latest
     resource_class: large
+    parameters:
+      python_ver:
+        type: string
     # Add steps to the job
     # See: https://circleci.com/docs/2.0/configuration-reference/#steps
     shell: /bin/bash --login -eo pipefail
     steps:
       - checkout
-      - restore_cache:
-          name: "Restore pip cache"
-          key: &pip-cache pip-{{ checksum "python/dev-requirements.txt" }}
-      - run:
-          name: "Install python deps"
-          command: |
-            pwd
-            pip3 install --upgrade pip
-            pip install -r python/dev-requirements.txt
       - run:
           name: "unit test"
           command: |
+            source /root/miniconda3/etc/profile.d/conda.sh
+            conda create -n test python=<< parameters.python_ver >> -y
+            conda activate test
             cd python
             export PYTHONPATH=.:$PYTHONPATH
-            python setup.py build_ext --inplace
+            pip install -r dev-requirements.txt
             mkdir test-results
             pytest --junitxml=test-results/junit-report.xml
-      - save_cache:
-          key: *pip-cache
-          paths:
-            - /usr/local/lib64/python3.8/site-packages
       - store_test_results:
           path: python/test-results
 
   linux_publish:
     docker:
-      - image: secretflow/trustflow-ci-ubuntu20.04:0.1.0b
+      - image: secretflow/trustedflow-dev-ubuntu22.04:latest
     resource_class: large
     parameters:
       python_ver:
@@ -82,10 +75,9 @@ jobs:
             conda create -n build python=<< parameters.python_ver >> -y
             conda activate build
             cd python
-            python3 setup.py bdist_wheel
+            python3 setup.py bdist_wheel && twine check dist/*
             python3 -m pip install twine auditwheel patchelf
-            auditwheel repair dist/*.whl --plat manylinux_2_31_x86_64
-            python3 -m twine upload -r pypi -u __token__ -p ${PYPI_TWINE_TOKEN} wheelhouse/*.whl
+            python3 -m twine upload -r pypi -u __token__ -p ${PYPI_TWINE_TOKEN} dist/*.whl
 
 # Invoke jobs via workflows
 # See: https://circleci.com/docs/2.0/configuration-reference/#workflows
@@ -94,12 +86,14 @@ workflows:
     when:
       not: << pipeline.parameters.GHA_Action >>
     jobs:
-      - linux_ut
+      - linux_ut:
+          matrix:
+            parameters:
+              python_ver: ["3.10"]
   publish:
     when: << pipeline.parameters.GHA_Action >>
     jobs:
       - linux_publish:
           matrix:
             parameters:
-              # python_ver: ["3.8", "3.9", "3.10", "3.11"]
-              python_ver: ["3.8"]
+              python_ver: ["3.10"]

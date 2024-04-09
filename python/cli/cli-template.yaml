@@ -12,111 +12,120 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-host: "127.0.0.1"
-mr_enclave: ""
-sim: true
+# (required) str, capsule-manager's ip:port
+host: "127.0.0.1:8888"
+# (required) str, capsule-manager's tee platform type, sim/sgx/tdx/csv
+tee_plat: "sim"
+# (optional) capsule-manager's identity constraints
+tee_constraints:
+  # (optional) str, The measurement of TEE implement internal stuff
+  mr_plat: null
+  # (optional) str, The measurement of TEE instance boot time stuff
+  mr_boot: null
+  # (optional) str, The static measurement of trust application when loading the code
+  mr_ta: null
+  # (optional) str, The measurement or other identity of the trust application signer
+  mr_signer: null
+
+# (optional) str, root ca cert path
 root_ca_file: null
+# (optional) str, sdk's private key path
 private_key_file: null
-# List[str], cert chain file
+# (optional) List[str], sdk's cert chain path
 cert_chain_file: null
 
 common:
-  # str
+  # (required) str, should be generated from cert
   party_id: "alice"
-  # List[str], cert chain file
-  cert_pems_file:
-    -
-  # str
+  # (required) List[str], cert chain files, the order is [cert, mid_ca_cert, root_ca_cert]
+  # file num can be 1 if the cert is self-signed
+  cert_pems_file: null
+  # (required) str, keep it be "RSA" here
   scheme: "RSA"
-  # file contains private key
+  # (required) str, file contains private key
   private_key_file: null
 
-get_data_keys:
-  # str
-  initiator_party_id:
-  # str
-  scope:
-  # str
-  op_name:
-  # List[str]
-  resource_uris:
-  # json-format string
-  env:
-  # json-format string
-  global_attrs:
-  # List[List[str]]
-  columns:
-  # List[str]
-  attrs:
 
 register_data_keys:
-  # List[str]
-  resource_uris:
-  # List[bytes]
-  data_key_b64s:
+  data_keys:
+    -
+      # (required) str
+      resource_uri:
+      # (required) str
+      data_key_b64:
 
 get_data_policys:
-  # str
+  # (required) str
   scope:
 
 register_data_policy:
-  # str
+  # (required) str
   scope:
-  # str
+  # (required) str
   data_uuid:
-  # List[str]
-  rule_ids:
-  # List[List[str]]
-  grantee_party_ids:
-  # List[List[str]]
-  columns:
-  # List[List[str]]
-  global_constraints:
-  # List[List[str]]
-  op_constraints_name:
-  # List[List[List[str]]]
-  op_constraints_body:
+  rules:
+    -
+      # (required) str
+      rule_id:
+      # (required) List[str]
+      grantee_party_ids:
+      # (required) List[str]
+      columns:
+      # (optional) List[str]
+      global_constraints:
+      # (required) List[dict]
+      op_constraints:
+        -
+          # (required) str
+          op_name:
+          # (optional) List[str]
+          constraints:
 
 delete_data_policy:
-  # str
+  # (required) str
   scope:
-  # str
+  # (required) str
   data_uuid:
 
 add_data_rule:
-  # str
+  # (required) str
   scope:
-  # str
+  # (required) str
   data_uuid:
-  # str
-  rule_id:
-  # List[str]
-  grantee_party_ids:
-  # List[str]
-  columns:
-  # List[str]
-  global_constraints:
-  # List[str]
-  op_constraints_name:
-  # List[List[str]]
-  op_constraints_body:
+  # (required) dict
+  rule:
+    # (required) str
+    rule_id:
+    # (required) List[str]
+    grantee_party_ids:
+    # (required) List[str]
+    columns:
+    # (optional) List[str]
+    global_constraints:
+    # (required) List[dict]
+    op_constraints:
+      -
+        # (required) str
+        op_name:
+        # (optional) List[str]
+        constraints:
 
 delete_data_rule:
-  # str
+  # (required) str
   scope:
-  # str
+  # (required) str
   data_uuid:
-  # str
+  # (required) str
   rule_id:
 
-get_export_data_key:
-  # str
+get_export_data_key_b64:
+  # (required) str
   party_id:
-  # str
+  # (required) str
   resource_uri:
-  # str
+  # (required) str
   data_export_certificate_file:
 
 delete_data_key:
-  # str
+  # (required) str
   resource_uri:

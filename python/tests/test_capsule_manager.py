@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import base64
 import socket
 import unittest
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sdc.capsule_manager_frame import CapsuleManagerFrame
-from tests.util.mock_capsule_manager import start_server
 from sdc.util import crypto
+from tests.util.mock_capsule_manager import start_server
 
 
 def pick_unused_port():
@@ -39,9 +40,9 @@ class TestCapsuleManager(unittest.TestCase):
     def test_get_pk(self):
         auth_frame = CapsuleManagerFrame(
             f"127.0.0.1:{self.port}",
+            "sim",
             "1083D6017E951017EB29611024D63D4DF73445DD880D1151E776541FEBE4A776",
             None,
-            True,
         )
         public_key_pem = auth_frame.get_public_key()
         self.assertGreater(len(public_key_pem), 0)
@@ -49,57 +50,54 @@ class TestCapsuleManager(unittest.TestCase):
     def test_data_keys(self):
         auth_frame = CapsuleManagerFrame(
             f"127.0.0.1:{self.port}",
+            "sim",
             "1083D6017E951017EB29611024D63D4DF73445DD880D1151E776541FEBE4A776",
             None,
-            True,
         )
-        data_key = AESGCM.generate_key(bit_length=128)
         auth_frame.register_cert("alice", self.cert_pems, "RSA", self.pri_key_pem)
-        auth_frame.create_data_keys(
-            "alice", ["dataA"], [data_key], None, self.pri_key_pem
-        )
+        data_key_b64 = base64.b64encode(AESGCM.generate_key(bit_length=128))
+        data_keys = [{"resource_uri": "dataA", "data_key_b64": data_key_b64}]
+        auth_frame.create_data_keys("alice", data_keys, None, self.pri_key_pem)
+        rules = [
+            {
+                "rule_id": "rule1",
+                "grantee_party_ids": ["bob"],
+                "columns": ["id"],
+                "global_constraints": None,
+                "op_constraints": [{"op_name": "*", "constraints": None}],
+            }
+        ]
         auth_frame.create_data_policy(
             "alice",
             "default",
             "dataA",
-            ["rule1"],
-            [["bob"]],
-            [["id"]],
-            None,
-            [["*"]],
-            None,
+            rules,
             None,
             self.pri_key_pem,
         )
-        result = auth_frame.get_data_keys(
-            "alice",
-            "default",
-            "PSI",
-            ["dataA"],
-            None,
-            None,
-            None,
-            None,
-            self.cert_pems,
-            self.pri_key_pem,
-        )
-        self.assertEqual(data_key, result[0][1])
 
         result = auth_frame.get_data_policys("alice", "default", None, self.pri_key_pem)
 
         self.assertEqual(len(result), 1)
         self.assertEqual(len(result[0].rules), 1)
 
+        rule = {
+            "rule_id": "rule2",
+            "grantee_party_ids": ["carol"],
+            "columns": ["name"],
+            "global_constraints": None,
+            "op_constraints": [
+                {
+                    "op_name": "OP_PSI",
+                    "constraints": ["r.env.sgx.mr_enclave=mr_enclave"],
+                }
+            ],
+        }
         auth_frame.add_data_rule(
             "alice",
             "default",
             "dataA",
-            "rule2",
-            ["carol"],
-            ["name"],
-            None,
-            ["OP_PSI"],
-            [["r.env.sgx.mr_enclave=mr_enclave"]],
+            rule,
             None,
             self.pri_key_pem,
         )

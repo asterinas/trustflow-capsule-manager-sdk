@@ -13,12 +13,18 @@
 # limitations under the License.
 
 import os
-import click
 import stat
-import yaml
+
+import click
+from ruamel.yaml import YAML
 
 current_work_dir = os.path.dirname(__file__)
 CONFIG_FILE = current_work_dir + "/cms/cli.yaml"
+
+# init yaml
+yaml = YAML()
+yaml.preserve_quotes = True
+yaml.indent(offset=2)
 
 
 def restore_config(cfg: dict):
@@ -43,16 +49,37 @@ def cms_config(ctx, config_file):
     global CONFIG_FILE
     CONFIG_FILE = config_file
     with open(CONFIG_FILE) as f:
-        config = yaml.safe_load(f)
+        config = yaml.load(f)
     ctx.obj = config
 
 
 @cms_config.command()
 @click.option("--host", type=click.STRING, help="the host of capsule manager")
 @click.option(
-    "--mr-enclave", type=click.STRING, help="the mrenclave of capsule manager"
+    "--tee-plat",
+    type=click.STRING,
+    help="the platform of tee, should be sim/sgx/tdx/csv",
 )
-@click.option("--sim", type=click.BOOL, help="the mode of capsule manager")
+@click.option(
+    "--mr-plat",
+    type=click.STRING,
+    help="the measurement of TEE implement internal stuff",
+)
+@click.option(
+    "--mr-boot",
+    type=click.STRING,
+    help="the measurement of TEE instance boot time stuff",
+)
+@click.option(
+    "--mr-ta",
+    type=click.STRING,
+    help="the static measurement of trust application when loading the code",
+)
+@click.option(
+    "--mr-signer",
+    type=click.STRING,
+    help="the measurement or other identity of the trust application signer",
+)
 @click.option(
     "--root-ca-file", type=click.STRING, help="the root CA of capsule manager"
 )
@@ -68,10 +95,28 @@ def cms_config(ctx, config_file):
     help="the cert chain of the party using capsule manager sdk",
 )
 @click.pass_context
-def init(ctx, host, mr_enclave, sim, root_ca_file, private_key_file, cert_chain_file):
+def init(
+    ctx,
+    host,
+    tee_plat,
+    mr_plat,
+    mr_boot,
+    mr_ta,
+    mr_signer,
+    root_ca_file,
+    private_key_file,
+    cert_chain_file,
+):
     set_dict_value(ctx.obj, "host", host)
-    set_dict_value(ctx.obj, "mr_enclave", mr_enclave)
-    set_dict_value(ctx.obj, "sim", sim)
+    set_dict_value(ctx.obj, "tee_plat", tee_plat)
+
+    if "tee_constraints" not in ctx.obj:
+        ctx.obj["tee_constraints"] = {}
+    set_dict_value(ctx.obj["tee_constraints"], "mr_plat", mr_plat)
+    set_dict_value(ctx.obj["tee_constraints"], "mr_boot", mr_boot)
+    set_dict_value(ctx.obj["tee_constraints"], "mr_ta", mr_ta)
+    set_dict_value(ctx.obj["tee_constraints"], "mr_signer", mr_signer)
+
     set_dict_value(ctx.obj, "root_ca_file", root_ca_file)
     set_dict_value(ctx.obj, "private_key_file", private_key_file)
     set_dict_value(ctx.obj, "cert_chain_file", cert_chain_file)
@@ -104,45 +149,6 @@ def common(ctx, party_id, cert_pems_file, scheme, private_key_file):
     set_dict_value(ctx.obj["common"], "cert_pems_file", cert_pems_file)
     set_dict_value(ctx.obj["common"], "scheme", value=scheme)
     set_dict_value(ctx.obj["common"], "private_key_file", private_key_file)
-
-    restore_config(ctx.obj)
-
-
-@cms_config.command()
-@click.option(
-    "--initiator-party-id",
-    type=click.STRING,
-    help="Identity of task initiator",
-)
-@click.option(
-    "--scope",
-    type=click.STRING,
-    default="default",
-    help="corresponding to the scope in the policy, only policies that are the same as the scope take effect",
-)
-@click.option(
-    "--op_name", type=click.STRING, help="behavior of operating on this resource"
-)
-@click.option(
-    "--env",
-    type=click.STRING,
-    help="in what environment is the data used (Json format)",
-)
-@click.option(
-    "--global-attrs",
-    type=click.STRING,
-    help="application-specific and data-independent attibutes (Json format)",
-)
-@click.pass_context
-def get_data_keys(ctx, initiator_party_id, scope, op_name, env, global_attrs):
-    if "get_data_keys" not in ctx.obj:
-        ctx.obj["get_data_keys"] = {}
-
-    set_dict_value(ctx.obj["get_data_keys"], "initiator_party_id", initiator_party_id)
-    set_dict_value(ctx.obj["get_data_keys"], "scope", scope)
-    set_dict_value(ctx.obj["get_data_keys"], "op_name", op_name)
-    set_dict_value(ctx.obj["get_data_keys"], "env", env)
-    set_dict_value(ctx.obj["get_data_keys"], "global_attrs", global_attrs)
 
     restore_config(ctx.obj)
 

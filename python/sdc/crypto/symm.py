@@ -14,6 +14,7 @@
 
 from abc import ABC, abstractmethod
 from typing import Union
+
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 

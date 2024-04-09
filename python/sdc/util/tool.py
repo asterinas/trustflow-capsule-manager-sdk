@@ -13,10 +13,11 @@
 # limitations under the License.
 
 import base64
-from sdc.util import crypto
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization
+
 from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from sdc.util import crypto
 
 
 def assert_list_len_equal(
@@ -33,8 +34,8 @@ def bytes2int(buf: bytes):
     return res
 
 
-def to_upper_hex(data: bytes):
-    return "".join("{:02X}".format(x) for x in data)
+def to_hex(data: bytes):
+    return "".join("{:02x}".format(x) for x in data)
 
 
 def encode_base64(input_bytes: bytes, urlsafe: bool = True) -> str:
