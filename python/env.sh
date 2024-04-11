@@ -15,17 +15,21 @@
 #
 #!/bin/bash
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-image=secretflow/trustflow-ci-ubuntu20.04:0.1.0b
+image=secretflow/trustedflow-dev-ubuntu22.04:latest
 DOCKER=docker
 project=capsule-manager-sdk
 
-sudo $DOCKER run --name ${project}-build-ubuntu-$(whoami)-sgx2 \
+if [[ $1 == 'enter' ]]; then
+    $DOCKER exec -it ${project}-build-ubuntu-$(whoami) bash
+else
+$DOCKER run --name ${project}-build-ubuntu-$(whoami) -td \
     --rm -it --entrypoint /bin/bash \
     --net host \
-    -v $DIR:/home/admin/dev \
+    -v $DIR:$DIR \
     -v /root/${USER}-${project}-bazel-cache-test:/root/.cache/bazel \
-    -w /home/admin/dev \
+    -w $DIR \
     --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
     --cap-add=NET_ADMIN \
     --privileged=true \
     ${image}
+fi

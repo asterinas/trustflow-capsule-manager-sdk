@@ -12,20 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from io import BufferedWriter
+import datetime
 import os
 import secrets
-import datetime
-from cryptography.hazmat.primitives.asymmetric import rsa
+from io import BufferedWriter
 from typing import List
-from cryptography.x509.oid import NameOID
-from cryptography import x509
-from cryptography.hazmat.primitives import serialization
 
-from cryptography.hazmat.primitives import hashes, hmac
-from sdc.util.tool import bytes2int
-from sdc.util import constants
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, hmac, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 from sdc.crypto import symm
+from sdc.util import constants
+from sdc.util.tool import bytes2int
 
 
 def hmac_sha256(key: bytes, *args: bytes) -> bytes:

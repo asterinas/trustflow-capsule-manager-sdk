@@ -1,6 +1,5 @@
 cryptography>=41.0.2
 grpcio
-sdc-apis==0.2.0.dev20230930
-pyyaml
+ruamel.yaml
 click
-twine
+trustedflow-verification==0.2.0.dev20240409

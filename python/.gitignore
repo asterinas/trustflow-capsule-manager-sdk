@@ -3,3 +3,5 @@ test-results
 *.so
 wheelhouse
 cli/*/*
+.coverage
+junit-report.xml

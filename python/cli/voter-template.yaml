@@ -12,9 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# (required) str, vote request signature
 vote_request_signature:
-vote_request_id:
-voter:
-# APPROVE/REJECT
-action:
+# (required) str, APPROVE/REJECT
+action: "APPROVE"
+# (required) List[str], cert chain files, the order is [cert, mid_ca_cert, root_ca_cert]
+# file num can be 1 if the cert is self-signed
+cert_chain_file:
+# (required) str, file contains voter's private key
 private_key_file:

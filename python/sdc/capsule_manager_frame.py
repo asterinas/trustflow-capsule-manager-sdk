@@ -13,26 +13,46 @@
 # limitations under the License.
 
 import base64
-import grpc
-
 from dataclasses import dataclass
 from typing import List, Union
-from google.protobuf import json_format
-from google.protobuf import message
+
+import grpc
+from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography import x509
+from google.protobuf import json_format, message
 from sdc.crypto import asymm, symm
 from sdc.error import CapsuleManagerError
 from sdc.util import crypto, tool
-from sdc.ual.constants import NONCE_SIZE_IN_SIZE
-from secretflowapis.v2.sdc import ual_pb2
-from secretflowapis.v2.sdc import jwt_pb2
+from secretflowapis.v2.sdc import jwt_pb2, ual_pb2
 from secretflowapis.v2.sdc.capsule_manager import (
     capsule_manager_pb2,
     capsule_manager_pb2_grpc,
 )
+
+NONCE_SIZE_IN_SIZE = 32
+
+# tee plat types
+TEE_PLAT_SIM = "sim"
+TEE_PLAT_SGX = "sgx"
+TEE_PLAT_TDX = "tdx"
+TEE_PLAT_CSV = "csv"
+
+# tee plat types in UAL Protobuf
+UAL_TEE_PLAT_SGX = "SGX_DCAP"
+UAL_TEE_PLAT_TDX = "TDX"
+UAL_TEE_PLAT_CSV = "CSV"
+
+RESOURCE_URI = "resource_uri"
+DATA_KEY_B64 = "data_key_b64"
+RULE_ID = "rule_id"
+GRANTEE_PARTY_IDS = "grantee_party_ids"
+COLUMNS = "columns"
+GLOBAL_CONSTRAINTS = "global_constraints"
+OP_CONSTRAINS = "op_constraints"
+OP_NAME = "op_name"
+CONSTRAINTS = "constraints"
 
 
 @dataclass
@@ -42,16 +62,31 @@ class CredentialsConf:
     cert_chain: bytes
 
 
+@dataclass
+class TeeConstraints:
+    mr_plat: str
+    mr_boot: str
+    mr_ta: str
+    mr_signer: str
+
+
 class CapsuleManagerFrame(object):
-    def __init__(self, host: str, mr_enclave: str, conf: CredentialsConf, sim=False):
+    def __init__(
+        self,
+        host: str,
+        tee_plat: str,
+        tee_constraints: TeeConstraints,
+        conf: CredentialsConf,
+    ):
         """CapsuleManager client
 
         Args:
             host: CapsuleManager endpoint
-            mr_enclave: CapsuleManager mr_enclave
-            sim (bool, optional): is in simulation mode. Defaults to False.
+            tee_plat: Tee platform, sim/sgx/tdx/csv
+            tee_constraints: CapsuleManager's measurement constraints
         """
-        self.sim = sim
+        self.tee_plat = tee_plat
+        self.tee_constraints = tee_constraints
         if conf is None:
             channel = grpc.insecure_channel(host)
         else:
@@ -63,7 +98,6 @@ class CapsuleManagerFrame(object):
             channel = grpc.secure_channel(host, credentials)
 
         self.stub = capsule_manager_pb2_grpc.CapsuleManagerStub(channel)
-        self.mr_enclave = mr_enclave if mr_enclave is not None else ""
 
     @staticmethod
     def create_encrypted_request(
@@ -170,26 +204,51 @@ class CapsuleManagerFrame(object):
         """Get CapsuleManager public key"""
         request = capsule_manager_pb2.GetRaCertRequest()
         nonce_bytes = crypto.gen_key(32)
-        request.nonce = tool.to_upper_hex(nonce_bytes)
+        request.nonce = tool.to_hex(nonce_bytes)
         response = self.stub.GetRaCert(request)
         if response.status.code != 0:
             raise CapsuleManagerError(response.status.code, response.status.message)
         assert len(response.cert) != 0, "The CapsuleManager should have public key."
 
-        if not self.sim:
-            from sdc.ual import ual
-            
+        if self.tee_plat != TEE_PLAT_SIM:
+            from trustedflow.attestation.verification import verifier
+
             policy = ual_pb2.UnifiedAttestationPolicy()
             rule = policy.main_attributes.add()
-            rule.str_tee_platform = "SGX_DCAP"
-            rule.hex_ta_measurement = self.mr_enclave
-            rule.bool_debug_disabled = "1"
 
             user_data = crypto.sha256(
                 response.cert.encode("utf-8"), request.nonce.encode("utf-8")
             )
-            rule.hex_user_data = tool.to_upper_hex(user_data)
-            ual.verify_report(response.attestation_report, policy)
+            rule.hex_user_data = tool.to_hex(user_data)
+
+            if self.tee_plat == TEE_PLAT_SGX:
+                rule.bool_debug_disabled = "true"
+                rule.str_tee_platform = UAL_TEE_PLAT_SGX
+                rule.hex_ta_measurement = self.tee_constraints.mr_ta
+                rule.hex_signer = self.tee_constraints.mr_signer
+            elif self.tee_plat == TEE_PLAT_TDX:
+                rule.bool_debug_disabled = "true"
+                rule.str_tee_platform = UAL_TEE_PLAT_TDX
+                rule.hex_platform_measurement = self.tee_constraints.mr_plat
+                rule.hex_boot_measurement = self.tee_constraints.mr_boot
+                rule.hex_ta_measurement = self.tee_constraints.mr_ta
+            elif self.tee_plat == TEE_PLAT_CSV:
+                rule.str_tee_platform = UAL_TEE_PLAT_CSV
+                rule.hex_boot_measurement = self.tee_constraints.mr_boot
+            else:
+                raise ValueError(f"Invalid TEE platform: {self.tee_plat}")
+
+            report_json = json_format.MessageToJson(
+                response.attestation_report, including_default_value_fields=True
+            )
+            policy_json = json_format.MessageToJson(
+                policy, including_default_value_fields=True
+            )
+            verify_status = verifier.attestation_report_verify(report_json, policy_json)
+            if verify_status.code != 0:
+                raise RuntimeError(
+                    f"attestation_report_verify failed. Code:{verify_status.code}, Message:{verify_status.message}, Details:{verify_status.details}."
+                )
 
         cert = x509.load_pem_x509_certificate(response.cert.encode("utf-8"))
         return cert.public_key().public_bytes(
@@ -228,132 +287,10 @@ class CapsuleManagerFrame(object):
                 encrypted_response.status.code, encrypted_response.status.message
             )
 
-    def get_data_keys(
-        self,
-        initiator_party_id: str,
-        scope: str,
-        op_name: str,
-        resource_uris: List[str],
-        env: str = None,
-        global_attrs: str = None,
-        columns: List[List[str]] = None,
-        attrs: List[str] = None,
-        cert_pems: List[bytes] = None,
-        private_key: Union[bytes, str, rsa.RSAPrivateKey] = None,
-    ) -> List[tuple]:
-        """Get data keys
-
-        Args:
-            initiator_party_id: Identity of task initiator
-            scope: Corresponding to the `scope` in the `Policy`,
-                only policies that are the same as the scope take effect
-            op_name: Behavior of operating on this resource
-            env: In what environment is the data used (Json format)
-                egg:
-                {
-                        "execution_time": "2023-07-12T12:00:00",
-                        "tee": {
-                           "type": "sgx2",
-                           "mr_enclave": "#####"
-                        }
-                }
-            global_attrs: Application-specific and data-independent attibutes (Json format)
-                egg:
-                {
-                    "xgb": {
-                        "tree_num": 1
-                    }
-                }
-            resource_uris: list of Resource that need to be accessed,
-                URI format: {data_uuid}/{partition_id}/{segment_id}
-            columns: if this is a structued data, specify which columns will be used
-            attrs: application-specific and data-dependent attributes (Json format)
-                egg:
-                {
-                    "join": [
-                        "join_key": ["id"],
-                            "reference_key": {
-                            "data_uuid": "t2",
-                            "join_key": ["id"]
-                            }
-                    ]
-                }
-            cert_pems: cert chain of party
-            private_key: private key of party
-
-            Notice: len(resource_uris) = len(columns) = len(attrs)
-
-        Returns:
-            List[(bytes, bytes)]: The data keys in the list correspond one-to-one to the elements in the resource_uri
-        """
-        resource_request = capsule_manager_pb2.ResourceRequest()
-        resource_request.initiator_party_id = initiator_party_id
-        resource_request.scope = scope
-        resource_request.op_name = op_name
-        if env is not None:
-            resource_request.env = env
-        if global_attrs is not None:
-            resource_request.global_attrs = global_attrs
-
-        tool.assert_list_len_equal(
-            resource_uris, columns, "len(resource_uris) != len(columns)"
-        )
-        tool.assert_list_len_equal(
-            resource_uris, attrs, "len(resource_uris) != len(attrs)"
-        )
-
-        for index in range(len(resource_uris)):
-            resource = resource_request.resources.add()
-            resource.resource_uri = resource_uris[index]
-            if columns is not None:
-                resource.columns.extend(columns[index])
-            if attrs is not None:
-                resource.attrs = attrs[index]
-
-        if private_key is None:
-            # Generate temp RSA key-pair
-            (private_key, cert_pems) = crypto.generate_rsa_keypair()
-
-        # call authmanager service
-        request = capsule_manager_pb2.GetDataKeysRequest()
-
-        request.resource_request.CopyFrom(resource_request)
-        if cert_pems is not None and len(cert_pems) > 0:
-            request.cert = cert_pems[0].decode("utf-8")
-        # Generate RA Report
-        if not self.sim:
-            digest = crypto.sha256(
-                cert_pems[0],
-                request.resource_request.SerializeToString(deterministic=True),
-            )
-            report = ual.create_report("Passport", tool.to_upper_hex(digest))
-            request.attestation_report.CopyFrom(report)
-
-        # encrypt request
-        encrypted_response = self.stub.GetDataKeys(
-            self.create_encrypted_request(
-                request, self.get_public_key(), private_key, cert_pems
-            )
-        )
-        if encrypted_response.status.code != 0:
-            raise CapsuleManagerError(
-                encrypted_response.status.code, encrypted_response.status.message
-            )
-
-        # decrypt request
-        response = capsule_manager_pb2.GetDataKeysResponse()
-        self.parse_from_encrypted_response(encrypted_response, private_key, response)
-
-        return [
-            (data_key.resource_uri, base64.b64decode(data_key.data_key_b64))
-            for data_key in response.data_keys
-        ]
-
     def create_data_keys(
         self,
         owner_party_id: str,
-        resource_uris: List[str],
-        data_keys: List[bytes],
+        data_keys: List[dict],
         cert_pems: List[bytes] = None,
         private_key: Union[bytes, str, rsa.RSAPrivateKey] = None,
     ):
@@ -361,25 +298,18 @@ class CapsuleManagerFrame(object):
 
         Args:
             owner_party_id: data owner
-            resource_uris: list of Resource that need to be accessed,
-                URI format: {data_uuid}/{partition_id}/{segment_id}
-            data_keys: list of data_key for every resource_uri
+            data_keys: list of data_key, data_key is a dict contains "resource_uri" and "data_key_b64"
             cert_pems: cert chain of party
             private_key: private key of party
 
-            Notice: len(resource_uris) = len(data_keys)
         """
         request = capsule_manager_pb2.CreateDataKeysRequest()
         request.owner_party_id = owner_party_id
 
-        tool.assert_list_len_equal(
-            resource_uris, data_keys, "len(resource_uris) != len(data_keys)"
-        )
-
-        for uri, data_key in zip(resource_uris, data_keys):
+        for data_key in data_keys:
             request.data_keys.add(
-                resource_uri=uri,
-                data_key_b64=base64.b64encode(data_key).decode("utf-8"),
+                resource_uri=data_key.get(RESOURCE_URI),
+                data_key_b64=data_key.get(DATA_KEY_B64),
             )
 
         if private_key is None:
@@ -442,12 +372,7 @@ class CapsuleManagerFrame(object):
         owner_party_id: str,
         scope: str,
         data_uuid: str,
-        rule_ids: List[str],
-        grantee_party_ids: List[List[str]],
-        columns: List[List[str]] = None,
-        global_constraints: List[List[str]] = None,
-        op_constraints_name: List[List[str]] = None,
-        op_constraints_body: List[List[List[str]]] = None,
+        rules: List[dict],
         cert_pems: List[bytes] = None,
         private_key: Union[bytes, str, rsa.RSAPrivateKey] = None,
     ):
@@ -457,12 +382,12 @@ class CapsuleManagerFrame(object):
             owner_party_id: data owner
             scope: scope
             data_uuid: data id
-            rule_ids: list of rule
-            grantee_party_ids: for every rule, the list of party ids being guanteed
-            columns: for every rule, specify which columns can be used, if this is a structued data
-            global_constraints: for every rule, gobal DSL decribed additional constraints
-            op_constraints_name: for every rule, op name: e.g. PSI, XGB, LR, SQL
-            op_constraints_body: for every rule, DSL decribed additional constraints, working on the specified operator.
+            rules: list of rule, rule is a dict contains:
+              rule_id: id of the rule
+              grantee_party_ids: for every rule, the list of party ids being guanteed
+              columns: for every rule, specify which columns can be used, if this is a structued data
+              global_constraints: for every rule, gobal DSL decribed additional constraints
+              op_constraints: list of op_constraint, it has op_name and corresponding constraints
             cert_pems: cert chain of party
             private_key: private key of party
 
@@ -472,42 +397,25 @@ class CapsuleManagerFrame(object):
         request.scope = scope
         request.policy.data_uuid = data_uuid
 
-        tool.assert_list_len_equal(
-            rule_ids, grantee_party_ids, "len(rule_ids) != len(grantee_party_ids)"
-        )
-        tool.assert_list_len_equal(rule_ids, columns, "len(rule_ids) != len(columns)")
-        tool.assert_list_len_equal(
-            rule_ids, global_constraints, "len(rule_ids) != len(global_constraints)"
-        )
-        tool.assert_list_len_equal(
-            rule_ids, op_constraints_name, "len(rule_ids) != len(op_constraints_name)"
-        )
-        tool.assert_list_len_equal(
-            rule_ids, op_constraints_body, "len(rule_ids) != len(op_constraints_body)"
-        )
-
-        for index in range(len(rule_ids)):
-            rule = request.policy.rules.add()
-            rule.rule_id = rule_ids[index]
-            rule.grantee_party_ids.extend(grantee_party_ids[index])
-            if columns is not None:
-                rule.columns.extend(columns[index])
-            if global_constraints is not None:
-                rule.global_constraints.extend(global_constraints[index])
-            if op_constraints_name is not None and op_constraints_body is not None:
-                tool.assert_list_len_equal(
-                    op_constraints_name[index],
-                    op_constraints_body[index],
-                    f"len(op_constraints_name[{index}]) != len(op_constraints_body[{index}])",
-                )
-
-                for name, constraint in zip(
-                    op_constraints_name[index], op_constraints_body[index]
-                ):
-                    rule.op_constraints.add(op_name=name, constraints=constraint)
-            elif op_constraints_name is not None:
-                for name in op_constraints_name[index]:
-                    rule.op_constraints.add(op_name=name, constraints=[])
+        for rule in rules:
+            rule_add = request.policy.rules.add()
+            rule_add.rule_id = rule.get(RULE_ID)
+            if rule.get(GRANTEE_PARTY_IDS) is not None:
+                rule_add.grantee_party_ids.extend(rule.get(GRANTEE_PARTY_IDS))
+            if rule.get(COLUMNS) is not None:
+                rule_add.columns.extend(rule.get(COLUMNS))
+            if rule.get(GLOBAL_CONSTRAINTS) is not None:
+                rule_add.global_constraints.extend(rule.get(GLOBAL_CONSTRAINTS))
+            if rule.get(OP_CONSTRAINS) is not None:
+                for op_constraint in rule.get(OP_CONSTRAINS):
+                    constraints = (
+                        op_constraint.get(CONSTRAINTS)
+                        if op_constraint.get(CONSTRAINTS) is not None
+                        else []
+                    )
+                    rule_add.op_constraints.add(
+                        op_name=op_constraint.get(OP_NAME), constraints=constraints
+                    )
 
         if private_key is None:
             # Generate temp RSA key-pair
@@ -565,12 +473,7 @@ class CapsuleManagerFrame(object):
         owner_party_id: str,
         scope: str,
         data_uuid: str,
-        rule_id: str,
-        grantee_party_ids: List[str],
-        columns: List[str],
-        global_constraints: List[str],
-        op_constraints_name: List[str] = None,
-        op_constraints_body: List[List[str]] = None,
+        rule: dict,
         cert_pems: List[bytes] = None,
         private_key: Union[bytes, str, rsa.RSAPrivateKey] = None,
     ):
@@ -580,12 +483,12 @@ class CapsuleManagerFrame(object):
             owner_party_id: data owner
             scope: scope
             data_uuid: data id
-            rule_id: identifier of the rule
-            grantee_party_ids: the list of party ids being guanteed
-            columns:  specify which columns can be used, if this is a structued data
-            global_constraints: gobal DSL decribed additional constraints
-            op_constraints_name: op name: e.g. PSI, XGB, LR, SQL
-            op_constraints_body: DSL decribed additional constraints, working on the specified operator.
+            rule: rule is a dict contains:
+              rule_id: id of the rule
+              grantee_party_ids: for every rule, the list of party ids being guanteed
+              columns: for every rule, specify which columns can be used, if this is a structued data
+              global_constraints: for every rule, gobal DSL decribed additional constraints
+              op_constraints: list of op_constraint, it has op_name and corresponding constraints
             cert_pems: cert chain of party
             private_key: private key of party
 
@@ -594,22 +497,24 @@ class CapsuleManagerFrame(object):
         request.owner_party_id = owner_party_id
         request.data_uuid = data_uuid
         request.scope = scope
-        request.rule.rule_id = rule_id
-        request.rule.grantee_party_ids.extend(grantee_party_ids)
 
-        tool.assert_list_len_equal(
-            op_constraints_name,
-            op_constraints_body,
-            "len(op_constraints_name) != len(op_constraints_body)",
-        )
-
-        if columns is not None:
-            request.rule.columns.extend(columns)
-        if global_constraints is not None:
-            request.rule.global_constraints.extend(global_constraints)
-        if op_constraints_name is not None and op_constraints_body is not None:
-            for name, constraint in zip(op_constraints_name, op_constraints_body):
-                request.rule.op_constraints.add(op_name=name, constraints=constraint)
+        request.rule.rule_id = rule.get(RULE_ID)
+        if rule.get(GRANTEE_PARTY_IDS) is not None:
+            request.rule.grantee_party_ids.extend(rule.get(GRANTEE_PARTY_IDS))
+        if rule.get(COLUMNS) is not None:
+            request.rule.columns.extend(rule.get(COLUMNS))
+        if rule.get(GLOBAL_CONSTRAINTS) is not None:
+            request.rule.global_constraints.extend(rule.get(GLOBAL_CONSTRAINTS))
+        if rule.get(OP_CONSTRAINS) is not None:
+            for op_constraint in rule.get(OP_CONSTRAINS):
+                constraints = (
+                    op_constraint.get(CONSTRAINTS)
+                    if op_constraint.get(CONSTRAINTS) is not None
+                    else []
+                )
+                request.rule.op_constraints.add(
+                    op_name=op_constraint.get(OP_NAME), constraints=constraints
+                )
 
         if private_key is None:
             # Generate temp RSA key-pair
@@ -665,15 +570,15 @@ class CapsuleManagerFrame(object):
                 encrypted_response.status.code, encrypted_response.status.message
             )
 
-    def get_export_data_key(
+    def get_export_data_key_b64(
         self,
         request_party_id: str,
         resource_uri: str,
         data_export_certificate: str,
         cert_pems: List[bytes] = None,
         private_key: Union[bytes, str, rsa.RSAPrivateKey] = None,
-    ) -> bytes:
-        """get export data key
+    ) -> str:
+        """get export base64 encoded data key
 
         Args:
             request_party_id: the request owner
@@ -705,7 +610,7 @@ class CapsuleManagerFrame(object):
         # decrypt request
         response = capsule_manager_pb2.GetExportDataKeyResponse()
         self.parse_from_encrypted_response(encrypted_response, private_key, response)
-        return base64.b64decode(response.data_key.data_key_b64)
+        return response.data_key.data_key_b64
 
     def delete_data_key(
         self,

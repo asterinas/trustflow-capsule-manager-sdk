@@ -12,14 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-import click
 import base64
-from sdc.crypto import asymm
-from sdc.util import crypto
-from sdc.util import file
-from sdc.util import tool
+import json
+
+import click
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from sdc.crypto import asymm
+from sdc.util import crypto, file, tool
+
+VOTE_REQUEST = "vote_request"
+CERT_CHAIN_FILE = "cert_chain_file"
+CERT_CHAIN = "cert_chain"
+BODY = "body"
+PRIVATE_KEY_FILE = "private_key_file"
+VOTE_REQUEST_SIGNATURE = "vote_request_signature"
+VOTER_SIGNATURE = "voter_signature"
+VOTE_INVITE = "vote_invite"
 
 
 @click.group()
@@ -182,127 +190,140 @@ def decrypt_file_inplace(file, data_key_b64):
 
 @cms_util.command()
 @click.option(
-    "--config-file", type=click.STRING, required=True, help="the config file for voting"
+    "--vote-request-file",
+    type=click.STRING,
+    required=True,
+    help="the original vote request file",
 )
-def generate_voter_sign(config_file):
+@click.option(
+    "--signed-vote-request-file",
+    type=click.STRING,
+    required=True,
+    help="the signed vote request file",
+)
+def sign_vote_request(vote_request_file, signed_vote_request_file):
+    """
+    generate the vote request with signature when exporting the result data
+    """
+    config = file.read_yaml_file(vote_request_file)
+    vote_request = config[VOTE_REQUEST]
+    signed_vote_request = dict()
+
+    cert_chain = list()
+    if vote_request.get(CERT_CHAIN_FILE) is not None:
+        for filename in vote_request.pop(CERT_CHAIN_FILE):
+            cert_chain.append(file.read_file(filename, "r"))
+    signed_vote_request[CERT_CHAIN] = cert_chain
+
+    if vote_request.get(PRIVATE_KEY_FILE) is not None:
+        private_key = file.read_file(vote_request.pop(PRIVATE_KEY_FILE), "r").encode(
+            "utf-8"
+        )
+        vote_body_str = json.dumps(vote_request)
+        vote_body_b64 = base64.b64encode(vote_body_str.encode("utf-8")).decode("utf-8")
+        signed_vote_request[BODY] = vote_body_b64
+
+        # vote_request_signature
+        signature_b64 = base64.b64encode(
+            asymm.RsaSigner(private_key, "RS256")
+            .update(vote_body_b64.encode("utf-8"))
+            .sign()
+        ).decode("utf-8")
+        signed_vote_request[VOTE_REQUEST_SIGNATURE] = signature_b64
+
+    file.write_yaml_file(signed_vote_request, signed_vote_request_file)
+
+
+@cms_util.command()
+@click.option(
+    "--voter-file", type=click.STRING, required=True, help="the voter's config file"
+)
+@click.option(
+    "--signed-voter-file",
+    type=click.STRING,
+    required=True,
+    help="the voter's signed file",
+)
+def voter_sign(voter_file, signed_voter_file):
     """
     generate voter signature when exporting the result data
     """
-    config = file.read_yaml_file(config_file)
-    # get private key
-    private_key = file.read_file(config.pop("private_key_file"), "r").encode("utf-8")
-    # get requester's sign
-    request_sign = config.pop("vote_request_signature")
+    voter = file.read_yaml_file(voter_file)
+    voter_signed = dict()
 
-    body_str = json.dumps(config)
+    cert_chain = list()
+    if voter.get(CERT_CHAIN_FILE) is not None:
+        for filename in voter.pop(CERT_CHAIN_FILE):
+            cert_chain.append(file.read_file(filename, "r"))
+    voter_signed[CERT_CHAIN] = cert_chain
+
+    # get private key
+    private_key = file.read_file(voter.pop(PRIVATE_KEY_FILE), "r").encode("utf-8")
+    # get requester's sign
+    request_sign = voter.pop(VOTE_REQUEST_SIGNATURE)
+
+    body_str = json.dumps(voter)
     body_b64 = base64.b64encode(body_str.encode("utf-8")).decode("utf-8")
-    signature = base64.b64encode(
+    voter_signed[BODY] = body_b64
+
+    signature_b64 = base64.b64encode(
         asymm.RsaSigner(private_key, "RS256")
         .update(body_b64.encode("utf-8"))
         .update(request_sign.encode("utf-8"))
         .sign()
     ).decode("utf-8")
-    print(signature)
+
+    voter_signed[VOTER_SIGNATURE] = signature_b64
+    file.write_yaml_file(voter_signed, signed_voter_file)
 
 
 @cms_util.command()
 @click.option(
-    "--config-file", type=click.STRING, required=True, help="the config file for voting"
+    "--signed-vote-request-file",
+    type=click.STRING,
+    required=True,
+    help="the signed vote request file",
 )
 @click.option(
-    "--dest-file", type=click.STRING, help="the dest file to store voting result"
+    "--signed-voter-files",
+    type=click.STRING,
+    required=True,
+    multiple=True,
+    help="the voter's signed files",
 )
-def generate_data_export_cert(config_file, dest_file):
+@click.option(
+    "--vote-result-file",
+    type=click.STRING,
+    required=True,
+    help="the file to store voting result",
+)
+def generate_vote_result(
+    signed_vote_request_file, signed_voter_files, vote_result_file
+):
     """
-    generate the vote result when exporting the result data
+    generate vote result json from signed-vote-request-file and signed-voter-files
     """
-    config = file.read_yaml_file(config_file)
-    # config["vote_request"]
-    vote_request_config = dict()
-    # cert_chain
-    cert_pems_str = list()
-    for filename in config["vote_request"].pop("cert_chain_file"):
-        cert_pems_str.append(file.read_file(filename, "r"))
-    vote_request_config["cert_chain"] = cert_pems_str
+    vote_result_config = dict()
 
-    # signature
-    if config["vote_request"]["vote_request_signature"]:
-        vote_request_signature = config["vote_request"]["vote_request_signature"]
-    config["vote_request"].pop("vote_request_signature", None)
+    vote_request = dict()
+    vote_request_config = file.read_yaml_file(signed_vote_request_file)
+    vote_request[CERT_CHAIN] = vote_request_config[CERT_CHAIN]
+    vote_request[BODY] = vote_request_config[BODY]
+    vote_request[VOTE_REQUEST_SIGNATURE] = vote_request_config[VOTE_REQUEST_SIGNATURE]
 
-    # private-key
-    if config["vote_request"]["private_key_file"]:
-        private_key = file.read_file(
-            config["vote_request"]["private_key_file"], "r"
-        ).encode("utf-8")
-    config["vote_request"].pop("private_key_file", None)
+    vote_invite = list()
+    for signed_voter_file in signed_voter_files:
+        signed_voter_config = file.read_yaml_file(signed_voter_file)
+        vote_invite_item = dict()
+        vote_invite_item[CERT_CHAIN] = signed_voter_config[CERT_CHAIN]
+        vote_invite_item[BODY] = signed_voter_config[BODY]
+        vote_invite_item[VOTER_SIGNATURE] = signed_voter_config[VOTER_SIGNATURE]
+        vote_invite.append(vote_invite_item)
 
-    # body
-    vote_body_str = json.dumps(config["vote_request"])
-    vote_request_config["body"] = base64.b64encode(
-        vote_body_str.encode("utf-8")
-    ).decode("utf-8")
+    vote_result_config[VOTE_REQUEST] = vote_request
+    vote_result_config[VOTE_INVITE] = vote_invite
 
-    # vote_request_signature
-    if private_key:
-        vote_request_config["vote_request_signature"] = base64.b64encode(
-            asymm.RsaSigner(private_key, "RS256")
-            .update(vote_request_config["body"].encode("utf-8"))
-            .sign()
-        ).decode("utf-8")
-    else:
-        vote_request_config["vote_request_signature"] = vote_request_signature
-
-    # config["vote_invite"]
-    invite_list_config = list()
-    if "vote_invite" in config and config["vote_invite"]:
-        for invite in config["vote_invite"]:
-            invite_config = dict()
-            # cert_chain
-            cert_pems_str = list()
-            for filename in invite.pop("cert_chain_file"):
-                cert_pems_str.append(file.read_file(filename, "r"))
-            invite_config["cert_chain"] = cert_pems_str
-
-            # signature
-            voter_signature = invite.pop("voter_signature", None)
-
-            # private key
-            invite_private_key = invite.pop("private_key_file", None)
-            if invite_private_key:
-                invite_private_key = file.read_file(invite_private_key, "r").encode(
-                    "utf-8"
-                )
-
-            # body
-            invite_body_str = json.dumps(invite)
-            invite_config["body"] = base64.b64encode(
-                invite_body_str.encode("utf-8")
-            ).decode("utf-8")
-
-            if invite_private_key:
-                invite_config["voter_signature"] = base64.b64encode(
-                    asymm.RsaSigner(invite_private_key, "RS256")
-                    .update(invite_config["body"].encode("utf-8"))
-                    .update(
-                        vote_request_config["vote_request_signature"].encode("utf-8")
-                    )
-                    .sign()
-                ).decode("utf-8")
-            else:
-                invite_config["voter_signature"] = voter_signature
-
-            invite_list_config.append(invite_config)
-
-    # compose
-    cfg = dict()
-    cfg["vote_request"] = vote_request_config
-    cfg["vote_invite"] = invite_list_config
-
-    if dest_file:
-        file.write_file(dest_file, "w", json.dumps(cfg))
-    else:
-        print(json.dumps(cfg))
+    file.write_file(vote_result_file, "w", json.dumps(vote_result_config))
 
 
 if __name__ == "__main__":

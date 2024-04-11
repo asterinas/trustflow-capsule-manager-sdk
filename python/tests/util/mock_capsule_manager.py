@@ -16,20 +16,17 @@ from concurrent import futures
 from typing import Union
 
 import grpc
-from google.protobuf import message
-from google.protobuf import json_format
-from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric import rsa
+from google.protobuf import json_format, message
+from sdc.crypto import asymm, symm
+from sdc.util import crypto, tool
 from secretflowapis.v2 import status_pb2
-from sdc.util import tool
-from sdc.crypto import symm
-from sdc.crypto import asymm
-from sdc.util import crypto
+from secretflowapis.v2.sdc import jwt_pb2
 from secretflowapis.v2.sdc.capsule_manager import (
     capsule_manager_pb2,
     capsule_manager_pb2_grpc,
 )
-from secretflowapis.v2.sdc import jwt_pb2
 
 
 class CapsuleManagerServer(capsule_manager_pb2_grpc.CapsuleManagerServicer):

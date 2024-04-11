@@ -15,8 +15,7 @@
 import os
 import unittest
 
-from sdc.util import file, crypto
-
+from sdc.util import crypto, file
 
 SourceFilename = "source.dat"
 EncryptionFilename = "encryption.dat"

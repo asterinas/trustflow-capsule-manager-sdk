@@ -14,8 +14,8 @@
 
 import unittest
 
-from cryptography.hazmat.primitives import serialization
 from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 from sdc.crypto import asymm
 from sdc.util import crypto
 

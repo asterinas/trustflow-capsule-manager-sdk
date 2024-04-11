@@ -13,7 +13,13 @@
 # limitations under the License.
 
 from typing import Any
-import yaml
+
+from ruamel.yaml import YAML
+
+# init yaml
+yaml = YAML()
+yaml.preserve_quotes = True
+yaml.indent(offset=2)
 
 
 def read_file(file_path: str, mode: str):
@@ -22,12 +28,17 @@ def read_file(file_path: str, mode: str):
     return res
 
 
-def read_yaml_file(file_path: str):
-    with open(file_path) as f:
-        res = yaml.safe_load(f)
-    return res
-
-
 def write_file(file_path: str, mode: str, content: Any):
     with open(file_path, mode) as f:
         f.write(content)
+
+
+def read_yaml_file(file_path: str):
+    with open(file_path) as f:
+        res = yaml.load(f)
+    return res
+
+
+def write_yaml_file(content: dict, file_path: str):
+    with open(file_path, "w") as f:
+        yaml.dump(content, f)
