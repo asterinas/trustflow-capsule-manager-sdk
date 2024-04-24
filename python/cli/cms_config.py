@@ -24,7 +24,7 @@ CONFIG_FILE = current_work_dir + "/cms/cli.yaml"
 # init yaml
 yaml = YAML()
 yaml.preserve_quotes = True
-yaml.indent(offset=2)
+yaml.indent(mapping=2, sequence=4, offset=2)
 
 
 def restore_config(cfg: dict):
