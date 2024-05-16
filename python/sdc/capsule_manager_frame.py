@@ -326,6 +326,151 @@ class CapsuleManagerFrame(object):
                 encrypted_response.status.code, encrypted_response.status.message
             )
 
+    def get_data_keys(
+        self,
+        initiator_party_id: str,
+        scope: str,
+        op_name: str,
+        resource_uris: List[str],
+        env: str = None,
+        global_attrs: str = None,
+        columns: List[List[str]] = None,
+        attrs: List[str] = None,
+        cert_pems: List[bytes] = None,
+        private_key: Union[bytes, str, rsa.RSAPrivateKey] = None,
+    ) -> List[tuple]:
+        """Get data keys
+
+        Args:
+            initiator_party_id: Identity of task initiator
+            scope: Corresponding to the `scope` in the `Policy`,
+                only policies that are the same as the scope take effect
+            op_name: Behavior of operating on this resource
+            env: In what environment is the data used (Json format)
+                egg:
+                {
+                        "execution_time": "2023-07-12T12:00:00",
+                        "tee": {
+                           "type": "sgx2",
+                           "mr_enclave": "#####"
+                        }
+                }
+            global_attrs: Application-specific and data-independent attibutes (Json format)
+                egg:
+                {
+                    "xgb": {
+                        "tree_num": 1
+                    }
+                }
+            resource_uris: list of Resource that need to be accessed,
+                URI format: {data_uuid}/{partition_id}/{segment_id}
+            columns: if this is a structued data, specify which columns will be used
+            attrs: application-specific and data-dependent attributes (Json format)
+                egg:
+                {
+                    "join": [
+                        "join_key": ["id"],
+                            "reference_key": {
+                            "data_uuid": "t2",
+                            "join_key": ["id"]
+                            }
+                    ]
+                }
+            cert_pems: cert chain of party
+            private_key: private key of party
+
+            Notice: len(resource_uris) = len(columns) = len(attrs)
+
+        Returns:
+            List[(bytes, bytes)]: The data keys in the list correspond one-to-one to the elements in the resource_uri
+        """
+        resource_request = capsule_manager_pb2.ResourceRequest()
+        resource_request.initiator_party_id = initiator_party_id
+        resource_request.scope = scope
+        resource_request.op_name = op_name
+        if env is not None:
+            resource_request.env = env
+        if global_attrs is not None:
+            resource_request.global_attrs = global_attrs
+
+        tool.assert_list_len_equal(
+            resource_uris, columns, "len(resource_uris) != len(columns)"
+        )
+        tool.assert_list_len_equal(
+            resource_uris, attrs, "len(resource_uris) != len(attrs)"
+        )
+
+        for index in range(len(resource_uris)):
+            resource = resource_request.resources.add()
+            resource.resource_uri = resource_uris[index]
+            if columns is not None:
+                resource.columns.extend(columns[index])
+            if attrs is not None:
+                resource.attrs = attrs[index]
+
+        if private_key is None:
+            # Generate temp RSA key-pair
+            (private_key, cert_pems) = crypto.generate_rsa_keypair()
+
+        # call authmanager service
+        request = capsule_manager_pb2.GetDataKeysRequest()
+
+        request.resource_request.CopyFrom(resource_request)
+        if cert_pems is not None and len(cert_pems) > 0:
+            request.cert = cert_pems[0].decode("utf-8")
+
+        # Generate RA Report
+        if self.tee_plat == TEE_PLAT_SIM:
+            pass
+        if self.tee_plat == TEE_PLAT_SGX:
+            from trustedflow.attestation.generation.sgx2 import generator
+        elif self.tee_plat == TEE_PLAT_TDX:
+            from trustedflow.attestation.generation.tdx import generator
+        elif self.tee_plat == TEE_PLAT_CSV:
+            from trustedflow.attestation.generation.csv import generator
+        else:
+            raise ValueError(f"Invalid TEE platform: {self.tee_plat}")
+
+        if self.tee_plat != TEE_PLAT_SIM:
+            digest = crypto.sha256(
+                cert_pems[0],
+                request.resource_request.SerializeToString(deterministic=True),
+            )
+
+            report_params = ual_pb2.UnifiedAttestationReportParams()
+            report_params.hex_user_data = tool.to_hex(digest)
+            generate_params = ual_pb2.UnifiedAttestationGenerationParams()
+            generate_params.tee_identity = b"1"
+            generate_params.report_type = "Passport"
+            generate_params.report_params.CopyFrom(report_params)
+
+            generate_params_json = json_format.MessageToJson(
+                generate_params, including_default_value_fields=True
+            )
+
+            report_json = generator.generate_report_json(generate_params_json)
+            json_format.Parse(report_json, request.attestation_report)
+
+        # encrypt request
+        encrypted_response = self.stub.GetDataKeys(
+            self.create_encrypted_request(
+                request, self.get_public_key(), private_key, cert_pems
+            )
+        )
+        if encrypted_response.status.code != 0:
+            raise CapsuleManagerError(
+                encrypted_response.status.code, encrypted_response.status.message
+            )
+
+        # decrypt request
+        response = capsule_manager_pb2.GetDataKeysResponse()
+        self.parse_from_encrypted_response(encrypted_response, private_key, response)
+
+        return [
+            (data_key.resource_uri, data_key.data_key_b64)
+            for data_key in response.data_keys
+        ]
+
     def get_data_policys(
         self,
         owner_party_id: str,

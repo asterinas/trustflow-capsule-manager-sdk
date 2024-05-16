@@ -76,6 +76,20 @@ class TestCapsuleManager(unittest.TestCase):
             self.pri_key_pem,
         )
 
+        result = auth_frame.get_data_keys(
+            "alice",
+            "default",
+            "PSI",
+            ["dataA"],
+            None,
+            None,
+            None,
+            None,
+            self.cert_pems,
+            self.pri_key_pem,
+        )
+        self.assertEqual(data_key_b64, result[0][1])
+
         result = auth_frame.get_data_policys("alice", "default", None, self.pri_key_pem)
 
         self.assertEqual(len(result), 1)
