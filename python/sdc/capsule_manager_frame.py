@@ -420,18 +420,16 @@ class CapsuleManagerFrame(object):
             request.cert = cert_pems[0].decode("utf-8")
 
         # Generate RA Report
-        if self.tee_plat == TEE_PLAT_SIM:
-            pass
-        if self.tee_plat == TEE_PLAT_SGX:
-            from trustedflow.attestation.generation.sgx2 import generator
-        elif self.tee_plat == TEE_PLAT_TDX:
-            from trustedflow.attestation.generation.tdx import generator
-        elif self.tee_plat == TEE_PLAT_CSV:
-            from trustedflow.attestation.generation.csv import generator
-        else:
-            raise ValueError(f"Invalid TEE platform: {self.tee_plat}")
-
         if self.tee_plat != TEE_PLAT_SIM:
+            if self.tee_plat == TEE_PLAT_SGX:
+                from trustedflow.attestation.generation.sgx2 import generator
+            elif self.tee_plat == TEE_PLAT_TDX:
+                from trustedflow.attestation.generation.tdx import generator
+            elif self.tee_plat == TEE_PLAT_CSV:
+                from trustedflow.attestation.generation.csv import generator
+            else:
+                raise ValueError(f"Invalid TEE platform: {self.tee_plat}")
+
             digest = crypto.sha256(
                 cert_pems[0],
                 request.resource_request.SerializeToString(deterministic=True),
