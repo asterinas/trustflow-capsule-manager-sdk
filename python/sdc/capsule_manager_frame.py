@@ -448,7 +448,9 @@ class CapsuleManagerFrame(object):
                 generate_params, including_default_value_fields=True
             )
 
-            report_json = generator.generate_report_json(generate_params_json)
+            report_json = generator.create_attestation_generator().generate_report_json(
+                generate_params_json
+            )
             json_format.Parse(report_json, request.attestation_report)
 
         # encrypt request
