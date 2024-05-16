@@ -55,7 +55,7 @@ class TestCapsuleManager(unittest.TestCase):
             None,
         )
         auth_frame.register_cert("alice", self.cert_pems, "RSA", self.pri_key_pem)
-        data_key_b64 = base64.b64encode(AESGCM.generate_key(bit_length=128))
+        data_key_b64 = base64.b64encode(AESGCM.generate_key(bit_length=128)).decode("utf-8")
         data_keys = [{"resource_uri": "dataA", "data_key_b64": data_key_b64}]
         auth_frame.create_data_keys("alice", data_keys, None, self.pri_key_pem)
         rules = [
