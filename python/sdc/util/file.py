@@ -20,6 +20,7 @@ from ruamel.yaml import YAML
 yaml = YAML()
 yaml.preserve_quotes = True
 yaml.indent(mapping=2, sequence=4, offset=2)
+yaml.width = 40960
 
 
 def read_file(file_path: str, mode: str):
