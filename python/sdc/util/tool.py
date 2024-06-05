@@ -27,13 +27,6 @@ def assert_list_len_equal(
         assert len(l1) == len(l2), msg
 
 
-def bytes2int(buf: bytes):
-    res = 0
-    for index in range(len(buf)):
-        res = res << 8 | buf[len(buf) - index - 1]
-    return res
-
-
 def to_hex(data: bytes):
     return "".join("{:02x}".format(x) for x in data)
 

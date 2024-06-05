@@ -24,7 +24,13 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from sdc.crypto import symm
 from sdc.util import constants
-from sdc.util.tool import bytes2int
+
+
+def bytes2int(buf: bytes):
+    res = 0
+    for index in range(len(buf)):
+        res = res << 8 | buf[len(buf) - index - 1]
+    return res
 
 
 def hmac_sha256(key: bytes, *args: bytes) -> bytes:
